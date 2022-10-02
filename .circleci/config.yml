@@ -1,0 +1,73 @@
+version: 2
+
+jobs:
+  plan-apply:
+    working_directory: /tmp/project
+    docker:
+      - image: docker.mirror.hashicorp.services/hashicorp/terraform:light
+    steps:
+      - checkout
+      - run:
+          name: terraform init & plan
+          command: |
+            terraform init -input=false
+            terraform plan -out tfapply
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .
+
+  apply:
+    docker:
+      - image: docker.mirror.hashicorp.services/hashicorp/terraform:light
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: terraform
+          command: |
+            terraform apply -auto-approve tfapply
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .
+
+  test:
+    docker:
+      - image: bats/bats:latest
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: bats test
+          command: |
+            apk update
+            apk add --no-cache aws-cli
+            apk add curl
+
+            ./tests/test/bats/bin/bats tests/test/marketing-tests.bats
+            ./tests/test/bats/bin/bats tests/test/content-editor-tests.bats
+            ./tests/test/bats/bin/bats tests/test/hr-tests.bats
+            ./tests/test/bats/bin/bats tests/test/webpage-tests.bats
+            
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .
+
+workflows:
+  version: 2
+  plan_approve_apply:
+    jobs:
+      - plan-apply
+      - hold-apply:
+          type: approval
+          requires:
+            - plan-apply
+      - apply:
+          requires:
+            - hold-apply
+      - test:
+          requires:
+            - apply
+
